@@ -108,8 +108,21 @@ class StyleGAN2Loss(Loss):
         if do_Dmain or do_Dr1:
             name = 'Dreal_Dr1' if do_Dmain and do_Dr1 else 'Dreal' if do_Dmain else 'Dr1'
             with torch.autograd.profiler.record_function(name + '_forward'):
-                real_img_tmp = real_img.detach().requires_grad_(do_Dr1)
-                real_logits = self.run_D(real_img_tmp, real_c, sync=sync)
+                
+                # --- FIX FOR PYTORCH 2.x GRADIENT BUG ---
+                # Apply augmentations BEFORE enabling gradients to hide grid_sample from autograd history
+                if self.augment_pipe is not None:
+                    real_img_tmp = self.augment_pipe(real_img.detach())
+                else:
+                    real_img_tmp = real_img.detach()
+                
+                real_img_tmp = real_img_tmp.requires_grad_(do_Dr1)
+                
+                # Run Discriminator forward pass directly
+                with misc.ddp_sync(self.D, sync):
+                    real_logits = self.D(real_img_tmp, real_c)
+                # ----------------------------------------
+
                 training_stats.report('Loss/scores/real', real_logits)
                 training_stats.report('Loss/signs/real', real_logits.sign())
 
